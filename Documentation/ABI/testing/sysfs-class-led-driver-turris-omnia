@@ -11,6 +11,13 @@ Description:	(RW) On the front panel of the Turris Omnia router there is also
 		integer value between 0 and 100. It is therefore convenient to be
 		able to change this setting from software.
 
+		The button on the back of Turris 1.x routers selects one of 8
+		brightness levels, whose values (0-255) are in
+		brightness_levels/<N>. Reading this file returns the value of
+		the level in use; writing it selects the level whose value is
+		closest to the written one. If two levels are equally close, the
+		lower level index is selected.
+
 		Format: %i
 
 What:		/sys/class/leds/<led>/device/gamma_correction
