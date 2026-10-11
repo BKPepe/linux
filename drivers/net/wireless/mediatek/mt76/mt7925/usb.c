@@ -144,6 +144,9 @@ out:
 
 	mt76_worker_enable(&dev->mt76.tx_worker);
 
+	if (!err)
+		mt7925_reinit_led(dev);
+
 	return err;
 }
 
@@ -341,8 +344,12 @@ static int mt7925u_resume(struct usb_interface *intf)
 failed:
 	pm->suspended = false;
 
-	if (err < 0)
+	if (err < 0) {
 		mt792x_reset(&dev->mt76);
+		return err;
+	}
+
+	mt7925_reinit_led(dev);
 
 	return err;
 }

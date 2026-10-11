@@ -199,7 +199,9 @@ static int mt76_led_init(struct mt76_phy *phy)
 	struct ieee80211_hw *hw = phy->hw;
 	struct device_node *np = dev->dev->of_node;
 
-	if (!phy->leds.cdev.brightness_set && !phy->leds.cdev.blink_set)
+	if (!phy->leds.cdev.brightness_set &&
+	    !phy->leds.cdev.brightness_set_blocking &&
+	    !phy->leds.cdev.blink_set)
 		return 0;
 
 	np = of_get_child_by_name(np, "led");
@@ -242,7 +244,12 @@ static int mt76_led_init(struct mt76_phy *phy)
 
 static void mt76_led_cleanup(struct mt76_phy *phy)
 {
-	if (!phy->leds.cdev.brightness_set && !phy->leds.cdev.blink_set)
+	if (!phy->leds.cdev.brightness_set &&
+	    !phy->leds.cdev.brightness_set_blocking &&
+	    !phy->leds.cdev.blink_set)
+		return;
+
+	if (!phy->leds.cdev.dev)
 		return;
 
 	led_classdev_unregister(&phy->leds.cdev);
@@ -794,8 +801,12 @@ int mt76_register_device(struct mt76_dev *dev, bool vht,
 	}
 
 	ret = ieee80211_register_hw(hw);
-	if (ret)
+	if (ret) {
+		if (IS_ENABLED(CONFIG_MT76_LEDS))
+			mt76_led_cleanup(phy);
+
 		return ret;
+	}
 
 	WARN_ON(mt76_worker_setup(hw, &dev->tx_worker, NULL, "tx"));
 	set_bit(MT76_STATE_REGISTERED, &phy->state);

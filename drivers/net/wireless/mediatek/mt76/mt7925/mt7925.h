@@ -414,4 +414,11 @@ int mt7925_testmode_dump(struct ieee80211_hw *hw, struct sk_buff *msg,
 			 struct netlink_callback *cb, void *data, int len);
 
 int mt7925_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif);
+
+#if IS_ENABLED(CONFIG_MT76_LEDS)
+int mt7925_reinit_led(struct mt792x_dev *dev);
+#else
+static inline int mt7925_reinit_led(struct mt792x_dev *dev) { return 0; }
+#endif
+
 #endif

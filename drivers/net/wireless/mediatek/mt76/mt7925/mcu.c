@@ -57,7 +57,8 @@ int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
 		   cmd == MCU_UNI_CMD(STA_REC_UPDATE) ||
 		   cmd == MCU_UNI_CMD(OFFLOAD) ||
 		   cmd == MCU_UNI_CMD(SUSPEND) ||
-		   cmd == MCU_UNI_CMD(NAN)) {
+		   cmd == MCU_UNI_CMD(NAN) ||
+		   cmd == MCU_UNI_CMD(LED_GPIO_CTRL)) {
 		struct mt7925_mcu_uni_event *event;
 
 		skb_pull(skb, sizeof(*rxd));
@@ -4171,4 +4172,30 @@ int mt7925_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif
 
 	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(RSSI_MONITOR), &req,
 				 sizeof(req), false);
+}
+
+int mt7925_mcu_led_enable(struct mt792x_dev *dev, u8 led_idx, bool enable)
+{
+	struct mt7925_mcu_led_gpio_req req = {
+		.led_idx = led_idx,
+		.tag = cpu_to_le16(MT7925_LED_TAG_GPIO_ENABLE),
+		.len = cpu_to_le16(sizeof(req) - 4),
+		.val = enable ? 1 : 0,
+	};
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(LED_GPIO_CTRL),
+				 &req, sizeof(req), true);
+}
+
+int mt7925_mcu_led_set(struct mt792x_dev *dev, u8 led_idx, bool on)
+{
+	struct mt7925_mcu_led_gpio_req req = {
+		.led_idx = led_idx,
+		.tag = cpu_to_le16(MT7925_LED_TAG_CTRL),
+		.len = cpu_to_le16(sizeof(req) - 4),
+		.val = on ? 1 : 0,
+	};
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(LED_GPIO_CTRL),
+				 &req, sizeof(req), false);
 }

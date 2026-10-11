@@ -6,6 +6,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/thermal.h>
 #include <linux/firmware.h>
+#include <linux/of.h>
 #include "mt7925.h"
 #include "regd.h"
 #include "mac.h"
@@ -187,6 +188,154 @@ static int mt7925_init_nan_cap(struct mt76_dev *mdev)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_MT76_LEDS)
+static bool mt7925_led_unavailable(struct mt792x_dev *dev)
+{
+	return atomic_read(&dev->mt76.bus_hung) ||
+	       test_bit(MT76_REMOVED, &dev->mphy.state) ||
+	       test_bit(MT76_RESET, &dev->mphy.state) ||
+	       dev->pm.suspended;
+}
+
+static int mt7925_led_gpio_enable(struct mt792x_dev *dev, bool enable)
+{
+	int ret;
+
+	mt792x_mutex_acquire(dev);
+	if (mt7925_led_unavailable(dev))
+		ret = -EIO;
+	else
+		ret = mt7925_mcu_led_enable(dev, dev->mphy.leds.pin, enable);
+	mt792x_mutex_release(dev);
+
+	return ret;
+}
+
+static void mt7925_led_cleanup(struct mt792x_dev *dev)
+{
+	int ret;
+
+	if (!dev->mphy.leds.pin)
+		return;
+
+	ret = mt7925_led_gpio_enable(dev, false);
+	if (ret)
+		dev_dbg(dev->mt76.dev,
+			"failed to disable LED GPIO pin %u (%d)\n",
+			dev->mphy.leds.pin, ret);
+
+	dev->mphy.leds.pin = 0;
+	dev->mphy.leds.cdev.brightness_set_blocking = NULL;
+}
+
+static int mt7925_led_set_brightness(struct led_classdev *led_cdev,
+				     enum led_brightness brightness)
+{
+	struct mt76_phy *mphy = container_of(led_cdev, struct mt76_phy,
+					     leds.cdev);
+	struct mt792x_dev *dev = container_of(mphy->dev, struct mt792x_dev,
+					      mt76);
+	bool on = (brightness != LED_OFF);
+	int ret;
+
+	if (mphy->leds.al)
+		on = !on;
+
+	mt792x_mutex_acquire(dev);
+	if (mt7925_led_unavailable(dev))
+		ret = -EIO;
+	else
+		ret = mt7925_mcu_led_set(dev, mphy->leds.pin, on);
+	mt792x_mutex_release(dev);
+
+	return ret;
+}
+
+static void mt7925_init_led(struct mt792x_dev *dev)
+{
+	struct mt76_phy *mphy = &dev->mphy;
+	struct device_node *np = dev->mt76.dev->of_node;
+	int led_pin, ret;
+
+	/* This MCU command is supported only on MT7925 USB devices. */
+	if (!mt76_is_usb(&dev->mt76) || !is_mt7925(&dev->mt76))
+		return;
+
+	np = of_get_child_by_name(np, "led");
+	if (np) {
+		if (!of_device_is_available(np)) {
+			of_node_put(np);
+			return;
+		}
+
+		if (of_property_read_u32(np, "led-sources", &led_pin)) {
+			of_node_put(np);
+			return;
+		}
+
+		mphy->leds.pin = led_pin;
+		mphy->leds.al = of_property_read_bool(np, "led-active-low");
+		of_node_put(np);
+	} else {
+		/* Default for verified MT7925 USB adapters without DT node */
+		mphy->leds.pin = 1;
+	}
+
+	if (!mphy->leds.pin)
+		return;
+
+	/*
+	 * Enable the GPIO before registering the LED class device.
+	 * Do not expose a working-looking LED if GPIO setup fails.
+	 */
+	ret = mt7925_led_gpio_enable(dev, true);
+	if (ret) {
+		dev_warn(dev->mt76.dev,
+			 "failed to enable LED GPIO pin %u (%d)\n",
+			 mphy->leds.pin, ret);
+		mphy->leds.pin = 0;
+		return;
+	}
+
+	mphy->leds.cdev.brightness_set_blocking = mt7925_led_set_brightness;
+}
+
+int mt7925_reinit_led(struct mt792x_dev *dev)
+{
+	struct mt76_phy *mphy = &dev->mphy;
+	bool on;
+	int ret;
+
+	if (!mphy->leds.cdev.brightness_set_blocking || !mphy->leds.pin)
+		return 0;
+
+	mt792x_mutex_acquire(dev);
+	if (mt7925_led_unavailable(dev)) {
+		ret = -EIO;
+		goto out;
+	}
+
+	ret = mt7925_mcu_led_enable(dev, mphy->leds.pin, true);
+	if (ret)
+		goto out;
+
+	on = (mphy->leds.cdev.brightness != LED_OFF);
+	if (mphy->leds.al)
+		on = !on;
+
+	ret = mt7925_mcu_led_set(dev, mphy->leds.pin, on);
+
+out:
+	mt792x_mutex_release(dev);
+	if (ret)
+		dev_dbg(dev->mt76.dev,
+			"failed to restore LED state (%d)\n", ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mt7925_reinit_led);
+#endif
+
 static void mt7925_init_work(struct work_struct *work)
 {
 	struct mt792x_dev *dev = container_of(work, struct mt792x_dev,
@@ -209,10 +358,17 @@ static void mt7925_init_work(struct work_struct *work)
 
 	dev->mt76.init_wiphy = mt7925_init_nan_cap;
 
+#if IS_ENABLED(CONFIG_MT76_LEDS)
+	mt7925_init_led(dev);
+#endif
+
 	ret = mt76_register_device(&dev->mt76, true, mt76_rates,
 				   ARRAY_SIZE(mt76_rates));
 	if (ret) {
 		dev_err(dev->mt76.dev, "register device failed\n");
+#if IS_ENABLED(CONFIG_MT76_LEDS)
+		mt7925_led_cleanup(dev);
+#endif
 		return;
 	}
 

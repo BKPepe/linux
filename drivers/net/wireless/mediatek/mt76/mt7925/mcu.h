@@ -762,4 +762,21 @@ int mt7925_mcu_update_arp_filter(struct mt76_dev *dev,
 int
 mt7925_mcu_uni_bss_bcnft(struct mt792x_dev *dev,
 			 struct ieee80211_bss_conf *link_conf, bool enable);
+
+enum mt7925_mcu_led_tag {
+	MT7925_LED_TAG_GPIO_ENABLE = 0,
+	MT7925_LED_TAG_CTRL = 1,
+};
+
+struct mt7925_mcu_led_gpio_req {
+	u8 led_idx;
+	u8 rsv[3];
+	__le16 tag;
+	__le16 len;
+	u8 val;
+	u8 rsv2[3];
+} __packed;
+
+int mt7925_mcu_led_enable(struct mt792x_dev *dev, u8 led_idx, bool enable);
+int mt7925_mcu_led_set(struct mt792x_dev *dev, u8 led_idx, bool on);
 #endif
