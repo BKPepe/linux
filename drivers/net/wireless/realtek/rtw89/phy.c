@@ -3545,6 +3545,7 @@ static void rtw89_phy_c2h_rfk_rpt_log(struct rtw89_dev *rtwdev,
 	struct rtw89_c2h_rf_dack_rpt_log *dack;
 	struct rtw89_c2h_rf_tssi_rpt_log *tssi;
 	struct rtw89_c2h_rf_dpk_rpt_log *dpk;
+	struct rtw89_rfk_dpk_rpt *dpk_rpt;
 	struct rtw89_c2h_rf_iqk_rpt_log *iqk;
 	int i, j, k;
 
@@ -3642,6 +3643,11 @@ static void rtw89_phy_c2h_rfk_rpt_log(struct rtw89_dev *rtwdev,
 			goto out;
 
 		dpk = content;
+		dpk_rpt = &rtwdev->rfk_wait.dpk_rpt;
+		memcpy(dpk_rpt->path_ok, dpk->path_ok, sizeof(dpk_rpt->path_ok));
+		memcpy(dpk_rpt->txagc, dpk->txagc, sizeof(dpk_rpt->txagc));
+		/* pairs with smp_load_acquire() in the chip code reading it */
+		smp_store_release(&dpk_rpt->valid, true);
 		rtw89_debug(rtwdev, RTW89_DBG_RFK,
 			    "DPK ver:%d idx:%2ph band:%2ph bw:%2ph ch:%2ph path:%2ph\n",
 			    dpk->ver, dpk->idx, dpk->band, dpk->bw, dpk->ch, dpk->path_ok);
@@ -4240,6 +4246,7 @@ int rtw89_phy_rfk_dpk_and_wait(struct rtw89_dev *rtwdev,
 	int ret;
 
 	rtw89_phy_rfk_report_prep(rtwdev);
+	WRITE_ONCE(rtwdev->rfk_wait.dpk_rpt.valid, false);
 
 	ret = rtw89_fw_h2c_rf_dpk(rtwdev, phy_idx, chan);
 	if (ret)

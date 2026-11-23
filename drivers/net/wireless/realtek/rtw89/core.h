@@ -6711,11 +6711,18 @@ struct rtw89_rfk_record {
 	enum rtw89_rfk_report_state states[NUM_OF_RTW89_RFK_REPORT_TYPES];
 };
 
+struct rtw89_rfk_dpk_rpt {
+	bool valid;
+	u8 path_ok[2];
+	u8 txagc[2];
+};
+
 struct rtw89_rfk_wait_info {
 	struct completion completion;
 	ktime_t start_time;
 	enum rtw89_rfk_report_state state;
 	u8 version;
+	struct rtw89_rfk_dpk_rpt dpk_rpt;
 
 	int record_idx;
 	struct rtw89_rfk_record *record_ptr;

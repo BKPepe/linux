@@ -2385,25 +2385,69 @@ static void _wait_rx_mode(struct rtw89_dev *rtwdev, u8 kpath)
 	}
 }
 
+#define RTW8922A_RFK_CHANNEL_TRIES 3
+#define RTW8922A_DPK_TXAGC_GAP_MAX 5
+
+static bool rtw8922a_dpk_rpt_ok(struct rtw89_dev *rtwdev)
+{
+	struct rtw89_rfk_dpk_rpt *rpt = &rtwdev->rfk_wait.dpk_rpt;
+	bool valid = false;
+	int i;
+
+	for (i = 0; i < 20; i++) {
+		/* The report can come a little after the RFK state report. The
+		 * acquire pairs with smp_store_release() in rtw89_phy_c2h_rfk_rpt_log().
+		 */
+		valid = smp_load_acquire(&rpt->valid);
+		if (valid)
+			break;
+		fsleep(1000);
+	}
+
+	if (!valid)
+		return true;
+
+	if (!rpt->path_ok[RF_PATH_A] || !rpt->path_ok[RF_PATH_B])
+		return false;
+
+	return abs(rpt->txagc[RF_PATH_A] - rpt->txagc[RF_PATH_B]) <=
+	       RTW8922A_DPK_TXAGC_GAP_MAX;
+}
+
 static void rtw8922a_rfk_channel(struct rtw89_dev *rtwdev,
 				 struct rtw89_vif_link *rtwvif_link)
 {
 	enum rtw89_chanctx_idx chanctx_idx = rtwvif_link->chanctx_idx;
 	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, chanctx_idx);
+	struct rtw89_rfk_dpk_rpt *rpt = &rtwdev->rfk_wait.dpk_rpt;
 	enum rtw89_phy_idx phy_idx = rtwvif_link->phy_idx;
 	u8 phy_map = rtw89_btc_phymap(rtwdev, phy_idx, RF_AB, chanctx_idx);
 	u32 tx_en;
+	int try;
 
 	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_CHLK, BTC_WRFK_START);
 	rtw89_chip_stop_sch_tx(rtwdev, phy_idx, &tx_en, RTW89_SCH_TX_SEL_ALL);
 	_wait_rx_mode(rtwdev, RF_AB);
 
-	rtw89_phy_rfk_pre_ntfy_and_wait(rtwdev, phy_idx, 5);
-	rtw89_phy_rfk_txgapk_and_wait(rtwdev, phy_idx, chan, 54);
-	rtw89_phy_rfk_iqk_and_wait(rtwdev, phy_idx, chan, 84);
-	rtw89_phy_rfk_tssi_and_wait(rtwdev, phy_idx, chan, RTW89_TSSI_NORMAL, 20);
-	rtw89_phy_rfk_dpk_and_wait(rtwdev, phy_idx, chan, 34);
-	rtw89_phy_rfk_rxdck_and_wait(rtwdev, RTW89_PHY_0, chan, true, 32);
+	for (try = 1; try <= RTW8922A_RFK_CHANNEL_TRIES; try++) {
+		rtw89_phy_rfk_pre_ntfy_and_wait(rtwdev, phy_idx, 5);
+		rtw89_phy_rfk_txgapk_and_wait(rtwdev, phy_idx, chan, 54);
+		rtw89_phy_rfk_iqk_and_wait(rtwdev, phy_idx, chan, 84);
+		rtw89_phy_rfk_tssi_and_wait(rtwdev, phy_idx, chan, RTW89_TSSI_NORMAL, 20);
+		rtw89_phy_rfk_dpk_and_wait(rtwdev, phy_idx, chan, 34);
+		rtw89_phy_rfk_rxdck_and_wait(rtwdev, RTW89_PHY_0, chan, true, 32);
+
+		if (rtw8922a_dpk_rpt_ok(rtwdev))
+			break;
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "[RFK] try %d: DPK path_ok %2ph txagc %2ph, redo\n",
+			    try, rpt->path_ok, rpt->txagc);
+	}
+
+	if (try > RTW8922A_RFK_CHANNEL_TRIES)
+		rtw89_warn(rtwdev, "DPK still bad after %d tries\n",
+			   RTW8922A_RFK_CHANNEL_TRIES);
 
 	rtw89_chip_resume_sch_tx(rtwdev, phy_idx, tx_en);
 	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_CHLK, BTC_WRFK_STOP);
