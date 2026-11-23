@@ -7039,6 +7039,7 @@ int rtw89_core_init(struct rtw89_dev *rtwdev)
 
 	init_completion(&rtwdev->fw.req.completion);
 	init_completion(&rtwdev->rfk_wait.completion);
+	init_completion(&rtwdev->rfk_wait.dpk_rpt.done);
 
 	schedule_work(&rtwdev->load_firmware_work);
 

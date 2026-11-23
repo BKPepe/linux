@@ -2385,6 +2385,47 @@ static void _wait_rx_mode(struct rtw89_dev *rtwdev, u8 kpath)
 	}
 }
 
+#define RTW8922A_RFK_CHANNEL_TRIES 3
+#define RTW8922A_DPK_TXAGC_GAP_MAX 5
+#define RTW8922A_DPK_RPT_TIMEOUT_MS 20
+
+static bool rtw8922a_dpk_rpt_ok(struct rtw89_dev *rtwdev,
+				enum rtw89_phy_idx phy_idx, int try)
+{
+	struct rtw89_rfk_dpk_rpt *rpt = &rtwdev->rfk_wait.dpk_rpt;
+	unsigned long timeout = msecs_to_jiffies(RTW8922A_DPK_RPT_TIMEOUT_MS);
+	u8 path;
+
+	/* In MLO 1+1 mode each PHY owns one path, so there is nothing to
+	 * compare.
+	 */
+	if (rtw89_phy_get_kpath(rtwdev, phy_idx) != RF_AB)
+		return true;
+
+	/* Firmware without the report, and SER where C2H events are not
+	 * received, keep the old behaviour without a retry.
+	 */
+	if (!wait_for_completion_timeout(&rpt->done, timeout)) {
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "[RFK] try %d: no DPK report\n", try);
+		return true;
+	}
+
+	for (path = RF_PATH_A; path <= RF_PATH_B; path++)
+		if (!rpt->path_ok[path] || rpt->is_timeout[path])
+			goto bad;
+
+	if (abs_diff(rpt->txagc[RF_PATH_A], rpt->txagc[RF_PATH_B]) <=
+	    RTW8922A_DPK_TXAGC_GAP_MAX)
+		return true;
+
+bad:
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "[RFK] try %d: DPK path_ok %2ph timeout %2ph txagc %2ph, redo\n",
+		    try, rpt->path_ok, rpt->is_timeout, rpt->txagc);
+	return false;
+}
+
 static void rtw8922a_rfk_channel(struct rtw89_dev *rtwdev,
 				 struct rtw89_vif_link *rtwvif_link)
 {
@@ -2393,17 +2434,31 @@ static void rtw8922a_rfk_channel(struct rtw89_dev *rtwdev,
 	enum rtw89_phy_idx phy_idx = rtwvif_link->phy_idx;
 	u8 phy_map = rtw89_btc_phymap(rtwdev, phy_idx, RF_AB, chanctx_idx);
 	u32 tx_en;
+	bool ok = false;
+	int try;
 
 	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_CHLK, BTC_WRFK_START);
 	rtw89_chip_stop_sch_tx(rtwdev, phy_idx, &tx_en, RTW89_SCH_TX_SEL_ALL);
 	_wait_rx_mode(rtwdev, RF_AB);
 
-	rtw89_phy_rfk_pre_ntfy_and_wait(rtwdev, phy_idx, 5);
-	rtw89_phy_rfk_txgapk_and_wait(rtwdev, phy_idx, chan, 54);
-	rtw89_phy_rfk_iqk_and_wait(rtwdev, phy_idx, chan, 84);
-	rtw89_phy_rfk_tssi_and_wait(rtwdev, phy_idx, chan, RTW89_TSSI_NORMAL, 20);
-	rtw89_phy_rfk_dpk_and_wait(rtwdev, phy_idx, chan, 34);
-	rtw89_phy_rfk_rxdck_and_wait(rtwdev, RTW89_PHY_0, chan, true, 32);
+	/* A bad DPK comes with bad TSSI and IQK results of the same path,
+	 * so redo the whole channel calibration, not only DPK.
+	 */
+	for (try = 1; try <= RTW8922A_RFK_CHANNEL_TRIES; try++) {
+		rtw89_phy_rfk_pre_ntfy_and_wait(rtwdev, phy_idx, 5);
+		rtw89_phy_rfk_txgapk_and_wait(rtwdev, phy_idx, chan, 54);
+		rtw89_phy_rfk_iqk_and_wait(rtwdev, phy_idx, chan, 84);
+		rtw89_phy_rfk_tssi_and_wait(rtwdev, phy_idx, chan, RTW89_TSSI_NORMAL, 20);
+		rtw89_phy_rfk_dpk_and_wait(rtwdev, phy_idx, chan, 34);
+		ok = rtw8922a_dpk_rpt_ok(rtwdev, phy_idx, try);
+		rtw89_phy_rfk_rxdck_and_wait(rtwdev, RTW89_PHY_0, chan, true, 32);
+		if (ok)
+			break;
+	}
+
+	if (!ok)
+		rtw89_warn(rtwdev, "DPK still bad after %d tries\n",
+			   RTW8922A_RFK_CHANNEL_TRIES);
 
 	rtw89_chip_resume_sch_tx(rtwdev, phy_idx, tx_en);
 	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_CHLK, BTC_WRFK_STOP);
