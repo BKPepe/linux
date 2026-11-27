@@ -1130,10 +1130,12 @@ static int rtw89_reg_6ghz_power_recalc(struct rtw89_dev *rtwdev,
 				       struct rtw89_vif_link *rtwvif_link, bool active,
 				       unsigned int *changed)
 {
+	struct ieee80211_vif *vif = rtwvif_link_to_vif(rtwvif_link);
 	struct rtw89_regulatory_info *regulatory = &rtwdev->regulatory;
 	const struct rtw89_regd *regd = regulatory->regd;
 	bool blocked[NUM_OF_RTW89_REG_6GHZ_POWER] = {};
 	u8 index = rtw89_regd_get_index(rtwdev, regd);
+	enum ieee80211_ap_reg_power power_type;
 	struct ieee80211_bss_conf *bss_conf;
 	bool dflt = false;
 
@@ -1145,8 +1147,14 @@ static int rtw89_reg_6ghz_power_recalc(struct rtw89_dev *rtwdev,
 
 	bss_conf = rtw89_vif_rcu_dereference_link(rtwvif_link, true);
 
+	/* mac80211 sets no power type for an AP, so an AP uses LPI, as ath12k does */
+	if (vif->type == NL80211_IFTYPE_AP)
+		power_type = IEEE80211_REG_LPI_AP;
+	else
+		power_type = bss_conf->power_type;
+
 	if (active) {
-		switch (bss_conf->power_type) {
+		switch (power_type) {
 		case IEEE80211_REG_VLP_AP:
 			rtwvif_link->reg_6ghz_power = RTW89_REG_6GHZ_POWER_VLP;
 			break;

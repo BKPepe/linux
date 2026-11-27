@@ -820,11 +820,16 @@ static int rtw89_ops_start_ap(struct ieee80211_hw *hw,
 	}
 
 	chan = rtw89_chan_get(rtwdev, rtwvif_link->chanctx_idx);
-	if (chan->band_type == RTW89_BAND_6G)
+	if (vif->p2p && chan->band_type == RTW89_BAND_6G)
 		return -EOPNOTSUPP;
 
 	if (rtwdev->scanning)
 		rtw89_hw_scan_abort(rtwdev, rtwdev->scan_info.scanning_vif);
+
+	/* must do rtw89_reg_6ghz_recalc() before rfk channel */
+	ret = rtw89_reg_6ghz_recalc(rtwdev, rtwvif_link, true);
+	if (ret)
+		return ret;
 
 	ether_addr_copy(rtwvif_link->bssid, link_conf->bssid);
 	rtw89_cam_bssid_changed(rtwdev, rtwvif_link);
@@ -895,6 +900,7 @@ void rtw89_ops_stop_ap(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	rtw89_mac_stop_ap(rtwdev, rtwvif_link);
 	rtw89_chip_h2c_assoc_cmac_tbl(rtwdev, rtwvif_link, NULL);
 	rtw89_fw_h2c_join_info(rtwdev, rtwvif_link, NULL, true);
+	rtw89_reg_6ghz_recalc(rtwdev, rtwvif_link, false);
 }
 
 static int rtw89_ops_set_tim(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
