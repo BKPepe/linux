@@ -6247,7 +6247,10 @@ static void rtw89_init_he_cap(struct rtw89_dev *rtwdev,
 		       le16_encode_bits(IEEE80211_VHT_MAX_AMPDU_1024K,
 					IEEE80211_HE_6GHZ_CAP_MAX_AMPDU_LEN_EXP) |
 		       le16_encode_bits(chip->max_vht_mpdu_cap,
-					IEEE80211_HE_6GHZ_CAP_MAX_MPDU_LEN);
+					IEEE80211_HE_6GHZ_CAP_MAX_MPDU_LEN) |
+		       cpu_to_le16(IEEE80211_HE_6GHZ_CAP_RX_ANTPAT_CONS);
+		if (!hal->tx_path_diversity)
+			capa |= cpu_to_le16(IEEE80211_HE_6GHZ_CAP_TX_ANTPAT_CONS);
 		iftype_data->he_6ghz_capa.capa = capa;
 	}
 }
